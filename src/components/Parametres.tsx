@@ -1,0 +1,1191 @@
+import { useState, useEffect, useRef } from 'react';
+import { User, Mail, Camera, Bell, Lock, Eye, EyeOff, CheckCircle, XCircle, Loader2, Image, Upload, X, Server, Info } from 'lucide-react';
+import { getGoogleSyncStatus, createGoogleSyncRecord, initiateGoogleOAuth, disconnectGoogleSync, GoogleSyncStatus } from '../services/googleSyncService';
+import { getActiveProfile, getProfilePermissions, UserProfile } from '../services/profileService';
+import { getOrganizationSettings, uploadMainLogo, uploadCollapsedLogo, uploadMainLogoDark, uploadCollapsedLogoDark } from '../services/organizationSettingsService';
+import { getUserEmailConfig, createEmailConfig, updateEmailConfig, testSmtpConnection, validateEmail, EmailConfigFormData, getSuggestedPort } from '../services/emailConfigService';
+
+interface ParametresProps {
+  onNotificationClick: () => void;
+  notificationCount: number;
+}
+
+export default function Parametres({ onNotificationClick, notificationCount }: ParametresProps) {
+  const [profileData, setProfileData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    photoUrl: ''
+  });
+
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
+
+  const [googleSync, setGoogleSync] = useState<GoogleSyncStatus | null>(null);
+  const [isSyncLoading, setIsSyncLoading] = useState(true);
+  const [syncError, setSyncError] = useState('');
+
+  const [currentProfile, setCurrentProfile] = useState<UserProfile | null>(null);
+  const [canManageSettings, setCanManageSettings] = useState(false);
+  const [canAccessSheets, setCanAccessSheets] = useState(false);
+  const [mainLogoUrl, setMainLogoUrl] = useState<string | null>(null);
+  const [collapsedLogoUrl, setCollapsedLogoUrl] = useState<string | null>(null);
+  const [mainLogoDarkUrl, setMainLogoDarkUrl] = useState<string | null>(null);
+  const [collapsedLogoDarkUrl, setCollapsedLogoDarkUrl] = useState<string | null>(null);
+  const [isUploadingMainLogo, setIsUploadingMainLogo] = useState(false);
+  const [isUploadingCollapsedLogo, setIsUploadingCollapsedLogo] = useState(false);
+  const [isUploadingMainLogoDark, setIsUploadingMainLogoDark] = useState(false);
+  const [isUploadingCollapsedLogoDark, setIsUploadingCollapsedLogoDark] = useState(false);
+  const [logoSuccessMessage, setLogoSuccessMessage] = useState('');
+  const [logoErrorMessage, setLogoErrorMessage] = useState('');
+  const mainLogoInputRef = useRef<HTMLInputElement>(null);
+  const collapsedLogoInputRef = useRef<HTMLInputElement>(null);
+  const mainLogoDarkInputRef = useRef<HTMLInputElement>(null);
+  const collapsedLogoDarkInputRef = useRef<HTMLInputElement>(null);
+
+  const [emailConfigData, setEmailConfigData] = useState<EmailConfigFormData>({
+    from_name: '',
+    from_email: '',
+    use_different_account_name: false,
+    password: '',
+    host: '',
+    port: 587,
+    smtp_connection_type: 'TLS',
+    use_different_reply_to: false,
+    reply_to_email: ''
+  });
+  const [showEmailPassword, setShowEmailPassword] = useState(false);
+  const [emailConfigId, setEmailConfigId] = useState<string | null>(null);
+  const [isLoadingEmailConfig, setIsLoadingEmailConfig] = useState(true);
+  const [isSavingEmailConfig, setIsSavingEmailConfig] = useState(false);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [emailConfigError, setEmailConfigError] = useState('');
+  const [emailConfigSuccess, setEmailConfigSuccess] = useState('');
+  const [testConnectionResult, setTestConnectionResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [hasExistingPassword, setHasExistingPassword] = useState(false);
+
+  useEffect(() => {
+    loadGoogleSyncStatus();
+    loadProfile();
+    loadLogos();
+    loadEmailConfig();
+  }, []);
+
+  const loadProfile = async () => {
+    try {
+      const profile = await getActiveProfile();
+      setCurrentProfile(profile);
+      if (profile) {
+        const permissions = getProfilePermissions(profile.profile_type);
+        setCanManageSettings(permissions.canManageLogos);
+        setCanAccessSheets(profile.profile_type === 'Admin' || profile.profile_type === 'Manager');
+        setProfileData({
+          firstName: profile.first_name,
+          lastName: profile.last_name,
+          email: profile.email,
+          photoUrl: profile.photo_url
+        });
+      }
+    } catch (err) {
+      console.error('Error loading profile:', err);
+      setCanManageSettings(false);
+    }
+  };
+
+  const loadEmailConfig = async () => {
+    try {
+      setIsLoadingEmailConfig(true);
+      const profile = await getActiveProfile();
+      if (profile) {
+        const config = await getUserEmailConfig(profile.id);
+        if (config) {
+          setEmailConfigId(config.id);
+          setEmailConfigData({
+            from_name: config.from_name,
+            from_email: config.from_email,
+            use_different_account_name: config.use_different_account_name,
+            password: '',
+            host: config.host,
+            port: config.port,
+            smtp_connection_type: config.smtp_connection_type,
+            use_different_reply_to: config.use_different_reply_to,
+            reply_to_email: config.reply_to_email || ''
+          });
+          setHasExistingPassword(true);
+        }
+      }
+    } catch (err) {
+      console.error('Error loading email config:', err);
+    } finally {
+      setIsLoadingEmailConfig(false);
+    }
+  };
+
+  const handleSaveEmailConfig = async () => {
+    try {
+      setIsSavingEmailConfig(true);
+      setEmailConfigError('');
+      setEmailConfigSuccess('');
+
+      if (!currentProfile) {
+        setEmailConfigError('Profil utilisateur non trouvé');
+        return;
+      }
+
+      if (!emailConfigData.password && !hasExistingPassword) {
+        setEmailConfigError('Le mot de passe est requis');
+        return;
+      }
+
+      if (!emailConfigData.from_name.trim()) {
+        setEmailConfigError('Le nom de l\'expéditeur est requis');
+        return;
+      }
+
+      if (!emailConfigData.from_email.trim() || !validateEmail(emailConfigData.from_email)) {
+        setEmailConfigError('L\'email de l\'expéditeur n\'est pas valide');
+        return;
+      }
+
+      if (!emailConfigData.host.trim()) {
+        setEmailConfigError('L\'hôte SMTP est requis');
+        return;
+      }
+
+      if (emailConfigData.use_different_reply_to && emailConfigData.reply_to_email.trim() && !validateEmail(emailConfigData.reply_to_email)) {
+        setEmailConfigError('L\'email de réponse n\'est pas valide');
+        return;
+      }
+
+      const configToSave = { ...emailConfigData };
+      if (!configToSave.password && hasExistingPassword) {
+        configToSave.password = '********';
+      }
+
+      if (emailConfigId) {
+        await updateEmailConfig(emailConfigId, currentProfile.id, configToSave);
+      } else {
+        const newConfig = await createEmailConfig(currentProfile.id, configToSave);
+        setEmailConfigId(newConfig.id);
+        setHasExistingPassword(true);
+      }
+
+      setEmailConfigSuccess('Configuration email enregistrée avec succès');
+      setTimeout(() => setEmailConfigSuccess(''), 3000);
+    } catch (err) {
+      setEmailConfigError(err instanceof Error ? err.message : 'Erreur lors de l\'enregistrement');
+    } finally {
+      setIsSavingEmailConfig(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    try {
+      setIsTestingConnection(true);
+      setTestConnectionResult(null);
+
+      const configToTest = { ...emailConfigData };
+      if (!configToTest.password && hasExistingPassword) {
+        configToTest.password = '********';
+      }
+
+      const result = await testSmtpConnection(configToTest);
+      setTestConnectionResult(result);
+
+      setTimeout(() => setTestConnectionResult(null), 5000);
+    } catch (err) {
+      setTestConnectionResult({
+        success: false,
+        message: err instanceof Error ? err.message : 'Erreur lors du test'
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
+  const handleSmtpTypeChange = (type: 'SSL' | 'TLS' | 'None') => {
+    const suggestedPort = getSuggestedPort(type);
+    setEmailConfigData({
+      ...emailConfigData,
+      smtp_connection_type: type,
+      port: suggestedPort
+    });
+  };
+
+  const loadLogos = async () => {
+    try {
+      const settings = await getOrganizationSettings();
+      if (settings) {
+        setMainLogoUrl(settings.main_logo_url);
+        setCollapsedLogoUrl(settings.collapsed_logo_url);
+        setMainLogoDarkUrl(settings.main_logo_dark_url);
+        setCollapsedLogoDarkUrl(settings.collapsed_logo_dark_url);
+      }
+    } catch (err) {
+      console.error('Error loading logos:', err);
+    }
+  };
+
+  const loadGoogleSyncStatus = async () => {
+    try {
+      setIsSyncLoading(true);
+      setSyncError('');
+      const status = await getGoogleSyncStatus('mock-user-id');
+      setGoogleSync(status);
+    } catch (err) {
+      setSyncError('Erreur lors du chargement du statut de synchronisation');
+    } finally {
+      setIsSyncLoading(false);
+    }
+  };
+
+  const handleConnectGoogle = () => {
+    initiateGoogleOAuth();
+  };
+
+  const handleDisconnectGoogle = async () => {
+    if (!googleSync) return;
+
+    try {
+      setSyncError('');
+      await disconnectGoogleSync(googleSync.id);
+      await loadGoogleSyncStatus();
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Erreur lors de la déconnexion');
+    }
+  };
+
+  const handleSave = () => {
+    console.log('Saving profile:', profileData);
+  };
+
+  const validatePassword = (password: string) => {
+    const minLength = password.length >= 8;
+    const hasUpperCase = /[A-Z]/.test(password);
+    const hasLowerCase = /[a-z]/.test(password);
+    const hasNumber = /[0-9]/.test(password);
+    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+
+    return minLength && hasUpperCase && hasLowerCase && hasNumber && hasSpecialChar;
+  };
+
+  const handlePasswordChange = () => {
+    setPasswordError('');
+    setPasswordSuccess(false);
+
+    if (!passwordData.currentPassword || !passwordData.newPassword || !passwordData.confirmPassword) {
+      setPasswordError('Tous les champs sont requis.');
+      return;
+    }
+
+    if (!validatePassword(passwordData.newPassword)) {
+      setPasswordError('Le mot de passe doit contenir au moins 8 caractères, une majuscule, une minuscule, un chiffre et un caractère spécial.');
+      return;
+    }
+
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      setPasswordError('Les nouveaux mots de passe ne correspondent pas.');
+      return;
+    }
+
+    console.log('Changing password');
+    setPasswordSuccess(true);
+    setPasswordData({
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+    });
+  };
+
+  const handleMainLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setLogoErrorMessage('Seuls les fichiers image sont autorisés');
+      return;
+    }
+
+    try {
+      setIsUploadingMainLogo(true);
+      setLogoErrorMessage('');
+      setLogoSuccessMessage('');
+      const url = await uploadMainLogo(file);
+      setMainLogoUrl(url);
+      setLogoSuccessMessage('Logo principal mis à jour avec succès');
+      setTimeout(() => setLogoSuccessMessage(''), 3000);
+      window.location.reload();
+    } catch (err) {
+      setLogoErrorMessage(err instanceof Error ? err.message : 'Erreur lors du téléchargement');
+    } finally {
+      setIsUploadingMainLogo(false);
+    }
+  };
+
+  const handleCollapsedLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setLogoErrorMessage('Seuls les fichiers image sont autorisés');
+      return;
+    }
+
+    try {
+      setIsUploadingCollapsedLogo(true);
+      setLogoErrorMessage('');
+      setLogoSuccessMessage('');
+      const url = await uploadCollapsedLogo(file);
+      setCollapsedLogoUrl(url);
+      setLogoSuccessMessage('Logo réduit mis à jour avec succès');
+      setTimeout(() => setLogoSuccessMessage(''), 3000);
+      window.location.reload();
+    } catch (err) {
+      setLogoErrorMessage(err instanceof Error ? err.message : 'Erreur lors du téléchargement');
+    } finally {
+      setIsUploadingCollapsedLogo(false);
+    }
+  };
+
+  const handleMainLogoDarkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setLogoErrorMessage('Seuls les fichiers image sont autorisés');
+      return;
+    }
+
+    try {
+      setIsUploadingMainLogoDark(true);
+      setLogoErrorMessage('');
+      setLogoSuccessMessage('');
+      const url = await uploadMainLogoDark(file);
+      setMainLogoDarkUrl(url);
+      setLogoSuccessMessage('Logo dark mode principal mis à jour avec succès');
+      setTimeout(() => setLogoSuccessMessage(''), 3000);
+      window.location.reload();
+    } catch (err) {
+      setLogoErrorMessage(err instanceof Error ? err.message : 'Erreur lors du téléchargement');
+    } finally {
+      setIsUploadingMainLogoDark(false);
+    }
+  };
+
+  const handleCollapsedLogoDarkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setLogoErrorMessage('Seuls les fichiers image sont autorisés');
+      return;
+    }
+
+    try {
+      setIsUploadingCollapsedLogoDark(true);
+      setLogoErrorMessage('');
+      setLogoSuccessMessage('');
+      const url = await uploadCollapsedLogoDark(file);
+      setCollapsedLogoDarkUrl(url);
+      setLogoSuccessMessage('Logo dark mode réduit mis à jour avec succès');
+      setTimeout(() => setLogoSuccessMessage(''), 3000);
+      window.location.reload();
+    } catch (err) {
+      setLogoErrorMessage(err instanceof Error ? err.message : 'Erreur lors du téléchargement');
+    } finally {
+      setIsUploadingCollapsedLogoDark(false);
+    }
+  };
+
+  return (
+    <div className="flex-1 overflow-auto">
+      <header className="glass-card ml-20 mr-4 lg:mx-8 mt-4 md:mt-6 lg:mt-8 px-4 md:px-6 lg:px-8 py-4 md:py-5 flex items-center justify-between floating-shadow">
+        <div>
+          <h1 className="text-xl md:text-2xl font-light text-gray-900">Paramètres du compte</h1>
+          <p className="text-xs md:text-sm text-gray-500 font-light mt-1 hidden sm:block">Gérez les informations de votre profil</p>
+        </div>
+        <button onClick={onNotificationClick} className="w-10 h-10 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center justify-center transition-all hover:scale-105 relative flex-shrink-0">
+          <Bell className="w-5 h-5 text-gray-900 dark:text-gray-300" />
+          {notificationCount > 0 && (
+            <span className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-br from-red-500 to-red-600 rounded-full flex items-center justify-center text-white text-xs font-light shadow-lg animate-pulse">
+              {notificationCount}
+            </span>
+          )}
+        </button>
+      </header>
+
+      <div className="p-4 md:p-6 lg:p-8">
+        <div className="glass-card p-4 md:p-6 lg:p-8 floating-shadow">
+          <div className="flex flex-col md:flex-row items-center md:items-start gap-6 md:gap-8 mb-6 md:mb-8">
+            <div className="flex-shrink-0 w-full md:w-auto flex flex-col items-center">
+              <div className="relative">
+                <div className="w-24 h-24 md:w-32 md:h-32 rounded-full overflow-hidden bg-gradient-to-br from-blue-400 to-violet-500 shadow-xl">
+                  <img
+                    src={profileData.photoUrl}
+                    alt="Profile"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <button className="absolute bottom-0 right-0 w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-full shadow-lg hover:from-blue-600 hover:to-blue-700 transition-all hover:scale-110 flex items-center justify-center">
+                  <Camera className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 text-center mt-3 font-light">JPG, PNG max 5MB</p>
+            </div>
+
+            <div className="flex-1 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+                <div>
+                  <label className="block text-xs md:text-sm font-light text-gray-700 mb-2">
+                    Prénom
+                  </label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input
+                      type="text"
+                      value={profileData.firstName}
+                      onChange={(e) => setProfileData({ ...profileData, firstName: e.target.value })}
+                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-2xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50 font-light transition-all"
+                      placeholder="Prénom"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs md:text-sm font-light text-gray-700 mb-2">
+                    Nom
+                  </label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input
+                      type="text"
+                      value={profileData.lastName}
+                      onChange={(e) => setProfileData({ ...profileData, lastName: e.target.value })}
+                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-2xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50 font-light transition-all"
+                      placeholder="Nom"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs md:text-sm font-light text-gray-700 mb-2">
+                  Adresse email
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="email"
+                    value={profileData.email}
+                    onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
+                    className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50 font-light transition-all"
+                    placeholder="email@example.com"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-4">
+                <button
+                  onClick={handleSave}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full text-xs md:text-sm font-light hover:from-blue-600 hover:to-blue-700 transition-all shadow-md hover:scale-105"
+                >
+                  Enregistrer
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-card p-4 md:p-6 lg:p-8 floating-shadow mt-6">
+            <h2 className="text-lg md:text-xl font-light text-gray-900 mb-6">Modifier le mot de passe</h2>
+
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
+                <div>
+                  <label className="block text-xs md:text-sm font-light text-gray-700 mb-2">
+                    Mot de passe actuel
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input
+                      type={showCurrentPassword ? 'text' : 'password'}
+                      value={passwordData.currentPassword}
+                      onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
+                      className="w-full pl-10 pr-12 py-2.5 bg-white border border-gray-200 rounded-2xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50 font-light transition-all"
+                      placeholder="Entrez votre mot de passe actuel"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showCurrentPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs md:text-sm font-light text-gray-700 mb-2">
+                    Nouveau mot de passe
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      value={passwordData.newPassword}
+                      onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                      className="w-full pl-10 pr-12 py-2.5 bg-white border border-gray-200 rounded-2xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50 font-light transition-all"
+                      placeholder="Entrez votre nouveau mot de passe"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showNewPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs md:text-sm font-light text-gray-700 mb-2">
+                    Confirmer le nouveau mot de passe
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      value={passwordData.confirmPassword}
+                      onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                      className="w-full pl-10 pr-12 py-2.5 bg-white border border-gray-200 rounded-2xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50 font-light transition-all"
+                      placeholder="Confirmez votre nouveau mot de passe"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500 font-light">
+                Minimum 8 caractères, une majuscule, une minuscule, un chiffre et un caractère spécial
+              </p>
+
+              {passwordError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-2xl">
+                  <p className="text-xs text-red-600 font-light">{passwordError}</p>
+                </div>
+              )}
+
+              {passwordSuccess && (
+                <div className="p-3 bg-green-50 border border-green-200 rounded-2xl">
+                  <p className="text-xs text-green-600 font-light">Votre mot de passe a été modifié avec succès.</p>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-4">
+                <button
+                  onClick={handlePasswordChange}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full text-xs md:text-sm font-light hover:from-blue-600 hover:to-blue-700 transition-all shadow-md hover:scale-105"
+                >
+                  Modifier le mot de passe
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-card p-4 md:p-6 lg:p-8 floating-shadow mt-6">
+            <h2 className="text-lg md:text-xl font-light text-gray-900 mb-6">Synchronisation Google</h2>
+
+            <div className="space-y-6">
+              <p className="text-sm text-gray-600 font-light">
+                Synchronisez votre compte Google pour connecter {canAccessSheets ? 'Google Sheets et' : ''} votre Google Agenda avec l'application.
+              </p>
+
+              {syncError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-2xl">
+                  <p className="text-xs text-red-600 font-light">{syncError}</p>
+                </div>
+              )}
+
+              {isSyncLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {canAccessSheets && (
+                    <div className="glass-card p-4 rounded-2xl">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <svg className="w-5 h-5 text-gray-600" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14H5v-2h7v2zm0-4H5v-2h7v2zm0-4H5V7h7v2zm7 8h-5v-2h5v2zm0-4h-5v-2h5v2zm0-4h-5V7h5v2z"/>
+                          </svg>
+                          <span className="text-sm font-light text-gray-900">Google Sheets</span>
+                        </div>
+                        {googleSync?.gmail_connected ? (
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="w-5 h-5 text-green-600" />
+                            <span className="text-xs font-light text-green-700">Connecté</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <XCircle className="w-5 h-5 text-red-600" />
+                            <span className="text-xs font-light text-red-700">Non connecté</span>
+                          </div>
+                        )}
+                      </div>
+                      {googleSync?.gmail_connected && googleSync.gmail_email && (
+                        <p className="text-xs text-gray-500 font-light ml-8">{googleSync.gmail_email}</p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="glass-card p-4 rounded-2xl">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Bell className="w-5 h-5 text-gray-600" />
+                        <span className="text-sm font-light text-gray-900">Google Agenda</span>
+                      </div>
+                      {googleSync?.calendar_connected ? (
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="w-5 h-5 text-green-600" />
+                          <span className="text-xs font-light text-green-700">Connecté</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <XCircle className="w-5 h-5 text-red-600" />
+                          <span className="text-xs font-light text-red-700">Non connecté</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {googleSync?.last_sync_at && (
+                    <div className="text-xs text-gray-500 font-light">
+                      Dernière synchronisation : {new Date(googleSync.last_sync_at).toLocaleString('fr-FR')}
+                    </div>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row gap-3 pt-4">
+                    {(canAccessSheets && googleSync?.gmail_connected) || googleSync?.calendar_connected ? (
+                      <button
+                        onClick={handleDisconnectGoogle}
+                        className="w-full sm:w-auto px-6 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-full text-xs md:text-sm font-light transition-all shadow-md"
+                      >
+                        Déconnecter Google
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleConnectGoogle}
+                        className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full text-xs md:text-sm font-light hover:from-blue-600 hover:to-blue-700 transition-all shadow-md hover:scale-105"
+                      >
+                        Synchroniser avec Google
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="glass-card p-4 md:p-6 lg:p-8 floating-shadow mt-6">
+            <h2 className="text-lg md:text-xl font-light text-gray-900 dark:text-gray-100 mb-6">Configuration e-mail</h2>
+
+            <div className="space-y-6">
+              <p className="text-sm text-gray-600 dark:text-gray-400 font-light">
+                Configurez les paramètres SMTP pour envoyer des emails depuis le CRM via votre compte email professionnel.
+              </p>
+
+              {emailConfigError && (
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl">
+                  <p className="text-sm text-red-600 dark:text-red-400 font-light">{emailConfigError}</p>
+                </div>
+              )}
+
+              {emailConfigSuccess && (
+                <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-2xl">
+                  <p className="text-sm text-green-600 dark:text-green-400 font-light">{emailConfigSuccess}</p>
+                </div>
+              )}
+
+              {testConnectionResult && (
+                <div className={`p-3 border rounded-2xl ${testConnectionResult.success ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'}`}>
+                  <p className={`text-sm font-light ${testConnectionResult.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {testConnectionResult.message}
+                  </p>
+                </div>
+              )}
+
+              {isLoadingEmailConfig ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        From name *
+                      </label>
+                      <div className="relative">
+                        <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                        <input
+                          type="text"
+                          value={emailConfigData.from_name}
+                          onChange={(e) => setEmailConfigData({ ...emailConfigData, from_name: e.target.value })}
+                          className="w-full pl-10 pr-10 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-sm text-gray-900 dark:text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-400/50 font-light transition-all"
+                          placeholder="Mandjé"
+                        />
+                        {emailConfigData.from_name && (
+                          <button
+                            onClick={() => setEmailConfigData({ ...emailConfigData, from_name: '' })}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        From email *
+                      </label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                        <input
+                          type="email"
+                          value={emailConfigData.from_email}
+                          onChange={(e) => setEmailConfigData({ ...emailConfigData, from_email: e.target.value })}
+                          className="w-full pl-10 pr-10 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-sm text-gray-900 dark:text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-400/50 font-light transition-all"
+                          placeholder="mandje@2points.fr"
+                        />
+                        {emailConfigData.from_email && (
+                          <button
+                            onClick={() => setEmailConfigData({ ...emailConfigData, from_email: '' })}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="use-different-account"
+                      checked={emailConfigData.use_different_account_name}
+                      onChange={(e) => setEmailConfigData({ ...emailConfigData, use_different_account_name: e.target.checked })}
+                      className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-blue-500 focus:ring-2 focus:ring-blue-400/50"
+                    />
+                    <label htmlFor="use-different-account" className="text-sm text-gray-700 dark:text-gray-300 font-light cursor-pointer flex items-center gap-2">
+                      Use different account name
+                      <Info className="w-4 h-4 text-gray-400" />
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+                      Password *
+                      <Info className="w-4 h-4 text-gray-400" />
+                    </label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                      <input
+                        type={showEmailPassword ? 'text' : 'password'}
+                        value={emailConfigData.password}
+                        onChange={(e) => setEmailConfigData({ ...emailConfigData, password: e.target.value })}
+                        className="w-full pl-10 pr-12 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-sm text-gray-900 dark:text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-400/50 font-light transition-all"
+                        placeholder={hasExistingPassword ? '••••••••••' : 'Entrez votre mot de passe'}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowEmailPassword(!showEmailPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                      >
+                        {showEmailPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
+                    </div>
+                    {hasExistingPassword && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 font-light mt-1">Laissez vide pour conserver le mot de passe actuel</p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Host *
+                      </label>
+                      <div className="relative">
+                        <Server className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                        <input
+                          type="text"
+                          value={emailConfigData.host}
+                          onChange={(e) => setEmailConfigData({ ...emailConfigData, host: e.target.value })}
+                          className="w-full pl-10 pr-10 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-sm text-gray-900 dark:text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-400/50 font-light transition-all"
+                          placeholder="smtp.ionos.fr"
+                        />
+                        {emailConfigData.host && (
+                          <button
+                            onClick={() => setEmailConfigData({ ...emailConfigData, host: '' })}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Port
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          value={emailConfigData.port}
+                          onChange={(e) => setEmailConfigData({ ...emailConfigData, port: parseInt(e.target.value) || 587 })}
+                          className="w-full px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-sm text-gray-900 dark:text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-400/50 font-light transition-all appearance-none"
+                          placeholder="587"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                      SMTP connection type
+                      <Info className="w-4 h-4 text-gray-400" />
+                    </label>
+                    <div className="grid grid-cols-3 gap-0 overflow-hidden rounded-2xl border border-gray-200 dark:border-gray-700">
+                      <button
+                        type="button"
+                        onClick={() => handleSmtpTypeChange('SSL')}
+                        className={`px-6 py-3 text-sm font-light transition-all ${
+                          emailConfigData.smtp_connection_type === 'SSL'
+                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white'
+                            : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        }`}
+                      >
+                        SSL
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSmtpTypeChange('TLS')}
+                        className={`px-6 py-3 text-sm font-light transition-all border-l border-r border-gray-200 dark:border-gray-700 ${
+                          emailConfigData.smtp_connection_type === 'TLS'
+                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white'
+                            : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        }`}
+                      >
+                        TLS
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSmtpTypeChange('None')}
+                        className={`px-6 py-3 text-sm font-light transition-all ${
+                          emailConfigData.smtp_connection_type === 'None'
+                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white'
+                            : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        }`}
+                      >
+                        None
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="use-different-reply-to"
+                      checked={emailConfigData.use_different_reply_to}
+                      onChange={(e) => setEmailConfigData({ ...emailConfigData, use_different_reply_to: e.target.checked })}
+                      className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-blue-500 focus:ring-2 focus:ring-blue-400/50"
+                    />
+                    <label htmlFor="use-different-reply-to" className="text-sm text-gray-700 dark:text-gray-300 font-light cursor-pointer flex items-center gap-2">
+                      Set a different reply-to address
+                      <Info className="w-4 h-4 text-gray-400" />
+                    </label>
+                  </div>
+
+                  {emailConfigData.use_different_reply_to && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Reply-to email
+                      </label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                        <input
+                          type="email"
+                          value={emailConfigData.reply_to_email}
+                          onChange={(e) => setEmailConfigData({ ...emailConfigData, reply_to_email: e.target.value })}
+                          className="w-full pl-10 pr-10 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl text-sm text-gray-900 dark:text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-400/50 font-light transition-all"
+                          placeholder="reply@example.com"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row gap-3 pt-4">
+                    <button
+                      onClick={handleTestConnection}
+                      disabled={isTestingConnection}
+                      className="w-full sm:w-auto px-6 py-2.5 bg-white/80 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full text-xs md:text-sm font-light hover:bg-white dark:hover:bg-gray-700 transition-all flex items-center justify-center gap-2 text-gray-900 dark:text-gray-100"
+                    >
+                      {isTestingConnection ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Test en cours...
+                        </>
+                      ) : (
+                        'Tester la connexion'
+                      )}
+                    </button>
+                    <button
+                      onClick={handleSaveEmailConfig}
+                      disabled={isSavingEmailConfig}
+                      className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full text-xs md:text-sm font-light hover:from-blue-600 hover:to-blue-700 transition-all shadow-md hover:scale-105 flex items-center justify-center gap-2"
+                    >
+                      {isSavingEmailConfig ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Enregistrement...
+                        </>
+                      ) : (
+                        'Enregistrer'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {canManageSettings && (
+            <div className="glass-card p-4 md:p-6 lg:p-8 floating-shadow mt-6">
+              <h2 className="text-lg md:text-xl font-light text-gray-900 dark:text-gray-100 mb-6">Personnalisation du CRM</h2>
+
+              <div className="space-y-6">
+                <p className="text-sm text-gray-600 dark:text-gray-400 font-light">
+                  Personnalisez les logos du CRM pour tous les utilisateurs de l'organisation.
+                </p>
+
+                {logoSuccessMessage && (
+                  <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-2xl">
+                    <p className="text-sm text-green-700 dark:text-green-300 font-light">{logoSuccessMessage}</p>
+                  </div>
+                )}
+
+                {logoErrorMessage && (
+                  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl">
+                    <p className="text-sm text-red-700 dark:text-red-300 font-light">{logoErrorMessage}</p>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                      Logo principal (sidebar étendue)
+                    </label>
+                    <div className="glass-card p-4 rounded-2xl border border-gray-200 dark:border-gray-700">
+                      <div className="flex items-center justify-center h-32 mb-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 rounded-xl">
+                        {mainLogoUrl ? (
+                          <img src={mainLogoUrl} alt="Logo principal" className="max-h-24 object-contain" />
+                        ) : (
+                          <img src="/Bienviyance-logo-2.png" alt="Logo par défaut" className="max-h-24 object-contain" />
+                        )}
+                      </div>
+                      <button
+                        onClick={() => mainLogoInputRef.current?.click()}
+                        disabled={isUploadingMainLogo}
+                        className="w-full px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-2xl text-sm font-light text-gray-700 dark:text-gray-300 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {isUploadingMainLogo ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Téléchargement...
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="w-4 h-4" />
+                            Modifier le logo
+                          </>
+                        )}
+                      </button>
+                      <input
+                        ref={mainLogoInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleMainLogoUpload}
+                        className="hidden"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 font-light mt-2 text-center">
+                        PNG, JPG, SVG - Max 2MB
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                      Logo réduit (sidebar rétractée)
+                    </label>
+                    <div className="glass-card p-4 rounded-2xl border border-gray-200 dark:border-gray-700">
+                      <div className="flex items-center justify-center h-32 mb-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 rounded-xl">
+                        {collapsedLogoUrl ? (
+                          <img src={collapsedLogoUrl} alt="Logo réduit" className="max-h-20 object-contain" />
+                        ) : (
+                          <img src="/Bienvisport-logo-b.png" alt="Logo par défaut" className="max-h-20 object-contain" />
+                        )}
+                      </div>
+                      <button
+                        onClick={() => collapsedLogoInputRef.current?.click()}
+                        disabled={isUploadingCollapsedLogo}
+                        className="w-full px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-2xl text-sm font-light text-gray-700 dark:text-gray-300 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {isUploadingCollapsedLogo ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Téléchargement...
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="w-4 h-4" />
+                            Modifier le logo
+                          </>
+                        )}
+                      </button>
+                      <input
+                        ref={collapsedLogoInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleCollapsedLogoUpload}
+                        className="hidden"
+                      />
+                      <p className="text-xs text-gray-500 font-light mt-2 text-center">
+                        PNG, JPG, SVG - Max 2MB
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-8">
+                  <h3 className="text-lg font-light text-gray-900 dark:text-gray-100 mb-4">Logos mode sombre</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 font-light mb-6">
+                    Personnalisez les logos qui s'affichent lorsque le thème sombre est activé.
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                        Logo principal dark mode (sidebar étendue)
+                      </label>
+                      <div className="glass-card p-4 rounded-2xl border border-gray-200 dark:border-gray-700">
+                        <div className="flex items-center justify-center h-32 mb-4 bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl">
+                          {mainLogoDarkUrl ? (
+                            <img src={mainLogoDarkUrl} alt="Logo principal dark mode" className="max-h-24 object-contain" />
+                          ) : (
+                            <img src="/Bienviyance-logo-7.png" alt="Logo dark mode par défaut" className="max-h-24 object-contain" />
+                          )}
+                        </div>
+                        <button
+                          onClick={() => mainLogoDarkInputRef.current?.click()}
+                          disabled={isUploadingMainLogoDark}
+                          className="w-full px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-2xl text-sm font-light text-gray-700 dark:text-gray-300 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                          {isUploadingMainLogoDark ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Téléchargement...
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-4 h-4" />
+                              Modifier le logo dark mode
+                            </>
+                          )}
+                        </button>
+                        <input
+                          ref={mainLogoDarkInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleMainLogoDarkUpload}
+                          className="hidden"
+                        />
+                        <p className="text-xs text-gray-500 dark:text-gray-400 font-light mt-2 text-center">
+                          PNG, JPG, SVG - Max 2MB
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                        Logo réduit dark mode (sidebar rétractée)
+                      </label>
+                      <div className="glass-card p-4 rounded-2xl border border-gray-200 dark:border-gray-700">
+                        <div className="flex items-center justify-center h-32 mb-4 bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl">
+                          {collapsedLogoDarkUrl ? (
+                            <img src={collapsedLogoDarkUrl} alt="Logo réduit dark mode" className="max-h-20 object-contain" />
+                          ) : (
+                            <img src="/Bienvisport-logo-b.png" alt="Logo B par défaut" className="max-h-20 object-contain" />
+                          )}
+                        </div>
+                        <button
+                          onClick={() => collapsedLogoDarkInputRef.current?.click()}
+                          disabled={isUploadingCollapsedLogoDark}
+                          className="w-full px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 rounded-2xl text-sm font-light text-gray-700 dark:text-gray-300 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                          {isUploadingCollapsedLogoDark ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Téléchargement...
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-4 h-4" />
+                              Modifier le logo dark mode
+                            </>
+                          )}
+                        </button>
+                        <input
+                          ref={collapsedLogoDarkInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleCollapsedLogoDarkUpload}
+                          className="hidden"
+                        />
+                        <p className="text-xs text-gray-500 dark:text-gray-400 font-light mt-2 text-center">
+                          PNG, JPG, SVG - Max 2MB
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl">
+                  <p className="text-xs text-blue-700 dark:text-blue-300 font-light">
+                    Les modifications seront visibles par tous les utilisateurs après rechargement de la page.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

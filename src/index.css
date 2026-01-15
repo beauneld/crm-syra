@@ -1,0 +1,387 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gradient-to-br from-gray-50 via-gray-100 to-white dark:from-gray-900 dark:via-gray-950 dark:to-black;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+    font-weight: 300;
+  }
+
+  .dark h1,
+  .dark h2,
+  .dark h3,
+  .dark h4,
+  .dark h5,
+  .dark h6 {
+    color: rgb(243 244 246);
+  }
+
+  .dark p {
+    color: rgb(209 213 219);
+  }
+
+  .dark label {
+    color: rgb(229 231 235);
+  }
+
+  .dark input,
+  .dark textarea,
+  .dark select {
+    background-color: rgb(31 41 55);
+    color: rgb(243 244 246);
+    border-color: rgb(55 65 81);
+  }
+
+  .dark input::placeholder,
+  .dark textarea::placeholder {
+    color: rgb(107 114 128);
+  }
+
+  .dark table th {
+    color: rgb(229 231 235);
+    background-color: rgb(31 41 55);
+  }
+
+  .dark table td {
+    color: rgb(209 213 219);
+    border-color: rgb(55 65 81);
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-3xl shadow-lg border border-white/20 dark:border-gray-700/30;
+    will-change: transform;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
+  .glass-card-hover {
+    @apply transition-all duration-300 hover:shadow-xl;
+  }
+
+  .dark .text-gray-900 {
+    color: rgb(243 244 246);
+  }
+
+  .dark .text-gray-800 {
+    color: rgb(229 231 235);
+  }
+
+  .dark .text-gray-700 {
+    color: rgb(209 213 219);
+  }
+
+  .dark .text-gray-600 {
+    color: rgb(156 163 175);
+  }
+
+  .dark .text-gray-500 {
+    color: rgb(156 163 175);
+  }
+
+  .dark .bg-white {
+    background-color: rgb(31 41 55);
+  }
+
+  .dark .bg-gray-50 {
+    background-color: rgb(17 24 39);
+  }
+
+  .dark .bg-gray-100 {
+    background-color: rgb(31 41 55);
+  }
+
+  .dark .border-gray-200 {
+    border-color: rgb(55 65 81);
+  }
+
+  .dark .border-gray-300 {
+    border-color: rgb(75 85 99);
+  }
+
+  .dark .hover\:bg-gray-50:hover {
+    background-color: rgb(31 41 55);
+  }
+
+  .dark .hover\:bg-gray-100:hover {
+    background-color: rgb(31 41 55);
+  }
+
+  .dark .divide-gray-200 > * + * {
+    border-color: rgb(55 65 81);
+  }
+
+  .slide-in-right {
+    animation: slideInRight 0.3s ease-out;
+  }
+
+  @keyframes slideInRight {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  .animate-fadeIn {
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+
+  @keyframes slideUp {
+    from {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fadeIn {
+      animation: none;
+    }
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
+      }
+    }
+  }
+
+  @media (max-width: 640px) {
+    [role="dialog"] > div {
+      max-width: 100vw !important;
+      max-height: 100vh !important;
+      border-radius: 0 !important;
+    }
+  }
+
+  .floating-shadow {
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.08);
+  }
+
+  .soft-border {
+    @apply border border-gray-200/50 dark:border-gray-700/50;
+  }
+
+  .workflow-line {
+    @apply border-2 border-dashed border-gray-300/50 dark:border-gray-600/50 rounded-full;
+  }
+
+  .animate-blob {
+    animation: blob 7s infinite;
+  }
+
+  .animation-delay-2000 {
+    animation-delay: 2s;
+  }
+
+  .animation-delay-4000 {
+    animation-delay: 4s;
+  }
+
+  @keyframes blob {
+    0% {
+      transform: translate(0px, 0px) scale(1);
+    }
+    33% {
+      transform: translate(30px, -50px) scale(1.1);
+    }
+    66% {
+      transform: translate(-20px, 20px) scale(0.9);
+    }
+    100% {
+      transform: translate(0px, 0px) scale(1);
+    }
+  }
+
+  .content-blur-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    background: rgba(15, 23, 42, 0.12);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: inherit;
+    opacity: 0;
+    transition: opacity 150ms ease-in-out;
+    pointer-events: none;
+  }
+
+  @supports not (backdrop-filter: blur(10px)) {
+    .content-blur-overlay {
+      background: rgba(15, 23, 42, 0.25);
+    }
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.18);
+    z-index: 90;
+    opacity: 0;
+    animation: fadeInBackdrop 200ms ease-out forwards;
+  }
+
+  .dark .modal-backdrop {
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  @keyframes fadeInBackdrop {
+    to {
+      opacity: 1;
+    }
+  }
+
+  .modal {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%) scale(0.98);
+    max-height: min(80vh, 780px);
+    overflow: auto;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: saturate(120%) blur(10px);
+    -webkit-backdrop-filter: saturate(120%) blur(10px);
+    border-radius: 24px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+    z-index: 100;
+    animation: modalEnter 200ms ease-out forwards;
+  }
+
+  .dark .modal {
+    background: rgba(17, 24, 39, 0.95);
+    backdrop-filter: saturate(120%) blur(20px);
+    -webkit-backdrop-filter: saturate(120%) blur(20px);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(55, 65, 81, 0.3);
+  }
+
+  @keyframes modalEnter {
+    to {
+      transform: translate(-50%, -50%) scale(1);
+    }
+  }
+
+  @supports not (backdrop-filter: blur(6px)) {
+    .modal {
+      background: rgba(255, 255, 255, 0.96);
+    }
+    .dark .modal {
+      background: rgba(31, 41, 55, 0.98);
+    }
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.5rem 2rem;
+    border-bottom: 1px solid rgba(229, 231, 235, 0.3);
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: 24px 24px 0 0;
+  }
+
+  .dark .modal-header {
+    background: rgba(31, 41, 55, 0.8);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(75, 85, 99, 0.2);
+  }
+
+  .modal-title {
+    font-size: 1.25rem;
+    font-weight: 300;
+    color: rgb(31, 41, 55);
+    margin: 0;
+  }
+
+  .dark .modal-title {
+    color: rgb(243, 244, 246);
+  }
+
+  .modal-close-btn {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 9999px;
+    background: rgba(243, 244, 246, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 150ms;
+    border: none;
+    cursor: pointer;
+    color: rgb(75, 85, 99);
+  }
+
+  .dark .modal-close-btn {
+    background: rgba(55, 65, 81, 0.8);
+    color: rgb(209, 213, 219);
+  }
+
+  .modal-close-btn:hover {
+    background: rgb(229, 231, 235);
+  }
+
+  .dark .modal-close-btn:hover {
+    background: rgba(75, 85, 99, 0.9);
+  }
+
+  .modal-close-btn:focus-visible {
+    outline: 2px solid rgb(59, 130, 246);
+    outline-offset: 2px;
+  }
+
+  .modal-content {
+    padding: 0;
+  }
+
+  @media (max-width: 768px) {
+    .modal {
+      width: 96vw !important;
+      max-height: 85vh;
+    }
+
+    .modal-header {
+      padding: 1rem 1.5rem;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .modal-backdrop,
+    .modal {
+      animation: none;
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    .content-blur-overlay {
+      transition: none;
+    }
+  }
+}
